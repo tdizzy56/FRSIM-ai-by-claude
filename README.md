@@ -55,7 +55,7 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 ## Fair play
 
 Use it in Singleplayer or in private rooms with friends who know a bot is playing.
-The bot **switches itself off in Ranked**. (it does infact work in ranked it sucks dont waste elo)
+The bot **switches itself off in Ranked**. (It does infact work in ranked it sucks don't waste elo)
 
 ## How it hooks into the game
 
