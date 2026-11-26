@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.0.0
+// @version      2.0.1
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.0.0';
+  const VERSION = '2.0.1';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -2077,6 +2077,22 @@
   const visibleButtons = () => [...document.querySelectorAll('button, [role="button"], a')]
     .filter((x) => !x.closest('#frsim-bot-host') && x.offsetParent !== null);
   let roomSniffAt = 0;
+  // the game's online-play store (rooms, chat, ping, and whether this is a ranked match)
+  let ONLINE = null;
+  const onlineState = () => {
+    const ok = (v) => { try { const g = v && typeof v.getState === 'function' && v.getState(); return !!(g && 'ranked' in g && 'pingMs' in g && 'lobbies' in g); } catch (_) { return false; } };
+    if (!ONLINE && CACHE) for (const mod of CACHE.values()) {
+      const ex = mod && mod.exports; if (!ex || typeof ex !== 'object') continue;
+      let keys; try { keys = Object.keys(ex); } catch (_) { continue; }
+      for (const k of keys) { let v; try { v = ex[k]; } catch (_) { continue; } if (typeof v === 'function' && ok(v)) { ONLINE = v; break; } }
+      if (ONLINE) break;
+    }
+    if (!ONLINE) for (const L of EXPORTS) { // the store is exported as a function (a hook with getState)
+      for (let i = 0; i < L.length - 2; i++) if (typeof L[i] === 'string' && L[i + 1] === 0 && typeof L[i + 2] === 'function' && ok(L[i + 2])) { ONLINE = L[i + 2]; break; }
+      if (ONLINE) break;
+    }
+    try { return ONLINE ? ONLINE.getState() : null; } catch (_) { return null; }
+  };
   const sniffRoom = (now) => {
     if (now - roomSniffAt < 1500 || !document.body) return;
     roomSniffAt = now;
@@ -2085,9 +2101,12 @@
     const inSolo = !inRoom && /single player/i.test((document.querySelector('h1,h2,h3,[class*="eyebrow"]') || {}).textContent || '') ||
       texts.includes('start match') && !texts.includes('switch teams');
     if (inRoom) B.multiplayer = true; else if (inSolo) B.multiplayer = false;
-    // Ranked is against real people: the bot never drives there
+    // Ranked is against real people: the bot never drives there. The game's own online store says whether this
+    // room came from the ranked queue (the on-screen text check is only a backup).
     const body = (document.body.innerText || '').slice(0, 4000);
-    B.ranked = texts.some((t) => /^(back to ranked|leave the ranked match\?|find a ranked match|ranked match)/.test(t)) || /\branked match\b/i.test(body);
+    const st = onlineState();
+    B.ranked = (st && st.ranked === true) ||
+      texts.some((t) => /^(back to ranked|leave the ranked match\?|find a ranked match|ranked match)/.test(t)) || /\branked match\b/i.test(body);
     try { sessionStorage.setItem('frsimBot.mp', B.multiplayer ? '1' : '0'); } catch (_) {}
   };
   try { B.multiplayer = sessionStorage.getItem('frsimBot.mp') === '1'; } catch (_) { B.multiplayer = false; }
@@ -2625,7 +2644,7 @@
   window.addEventListener('blur', () => releaseAll());
 
   // handy for debugging from the console
-  window.__frsimBot = { version: VERSION, B, get MEM() { return MEM; }, findGame, findRobotConfig, analyzeReplay, readSavedReplays, describeLesson, learnFromLeaderboard, applyReplayLesson, findReplayLib, findBoardLib,
+  window.__frsimBot = { version: VERSION, B, get MEM() { return MEM; }, findGame, findRobotConfig, analyzeReplay, readSavedReplays, describeLesson, learnFromLeaderboard, applyReplayLesson, findReplayLib, findBoardLib, onlineState,
     get hooked() { return { early: EXPORTS.length, cache: !!CACHE }; } };
   const ME = window.__frsimBot;
   // Driving starts first and never depends on the panel: a panel problem can't stop the bot.
