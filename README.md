@@ -15,12 +15,24 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 
 ## What it does
 
-**Learns from the pros**
-- *Learn from leaderboard* downloads the best shared runs for the robot you're driving (or robots of the same
-  type) and studies them with the game's own replay reader.
-- *Copy the pros* follows their auto route, shoots and passes from their spots, and picks up fuel where they did.
-- *Learn from saved replays*, or drop `.frcreplay` files on the panel.
-- A new lesson is tried for one match and kept only if it scores about as well as what the bot already had.
+**Collects like the top players** (new in 2.0)
+- Drives straight runs through the fuel flat out with the intake leading, picking the run that gets the most fuel per
+  second (counting the drive back to shoot), instead of creeping from pile to pile.
+- Shoots from just inside its zone where it crosses in (behind the bump or at the trench exit), turns toward the hub
+  on the way in, and brakes instead of coasting past its spot.
+- Cleans up big piles in its own zone and still goes out when the neutral zone has more.
+
+**Learns from the pros** (the *Learn from the pros* box on the panel)
+- *Leaderboard* downloads the best shared runs for the robot you're driving (or robots of the same type) and studies
+  them with the game's own replay reader.
+- *Upload replays* (or drop `.frcreplay` files on the panel), or *Saved* for replays saved in this browser.
+- *Copy the pros* drives the same pickup runs they made (when there's fuel there now) and shoots and passes from their
+  spots. A new lesson is tried for one match and kept only if it scores about as well as what the bot already had.
+
+**High scores**
+- *🏆 Post high score to GitHub* opens a ready-filled issue on this repo with your best score and robot; press Submit to
+  post it (it uses your own GitHub login — the script never stores a GitHub token). The button lights up when you have
+  a new best. [See posted scores](https://github.com/tdizzy56/FRSIM-ai-by-claude/issues?q=is%3Aissue+%22High+score%22+in%3Atitle).
 
 **Learns by itself**
 - A separate strategy for every robot and every robot type (how it aims, hopper size, dumper or not),
@@ -29,7 +41,7 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 - Saves the replay (pause menu → Save replay) when it beats its personal best.
 
 **Auto**
-- Keeps the preload and swipes the densest strip of the centre fuel, then shoots from the nearest legal spot.
+- Keeps the preload and makes fast runs through the centre fuel, shooting each load from just behind the bump.
 - Crosses the middle in singleplayer; stays on its own half in multiplayer.
 
 **Shifts**
@@ -42,8 +54,8 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 - Intake always faces the fuel; shoots only from inside its own alliance zone.
 - Turrets shoot from anywhere in range and pass on the move; the intake wiggles in and out to feed
   robots it helps.
-- Dumpers keep intaking; trenches only when the robot fits under the roof (hard-topped robots like
-  2910 and 1690 even when full); intake kept down near trenches.
+- Dumpers keep intaking; trenches only when the robot fits under the roof. 2910, 1690, 118, 1323, 1360, 5000, 1678
+  and 5460 go under even when full; the intake and hopper are kept down near trenches.
 - Wall, tower and depot cleaning, intake-jam recovery, pin detection, trench back-out.
 
 **Multiplayer**
