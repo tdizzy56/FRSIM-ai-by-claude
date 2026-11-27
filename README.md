@@ -91,7 +91,27 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 ## Fair play
 
 Use it in Singleplayer or in private rooms with friends who know a bot is playing.
-The bot **switches itself off in Ranked**. Use it in Singleplayer or private rooms.
+The bot **switches itself off in Ranked**, and a match the bot drove (even part of) is **never posted to the
+leaderboard** — the game's post is held back and its replay isn't uploaded. Your own matches with the bot off post as
+normal. Use it in Singleplayer or private rooms.
+
+## Going back to an earlier version
+
+Every released version is kept in [`versions/`](versions). To switch, click its **install** link below and press
+**Install** in Violentmonkey (it replaces the version you have; confirm if it says the one you're installing is older).
+To come back to the newest, install [`frsim-rebuilt-bot.user.js`](frsim-rebuilt-bot.user.js) again. What the bot has
+learned stays in your browser either way.
+
+| Version | What it added | |
+| --- | --- | --- |
+| 2.1.4 | Leaderboard guard: bot-driven matches are never posted | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.4.user.js) |
+| 2.1.3 | 5460 plays as a dumper | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.3.user.js) |
+| 2.1.2 | Expandable hoppers (1678, 5460), real hopper capacity | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.2.user.js) |
+| 2.1.1 | Copy the pros 1:1 follows by progress | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.1.user.js) |
+| 2.1.0 | Smarter auto, turning, stockpiles, robot types | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.0.user.js) |
+| 2.0.1 | Ranked detection from the game | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.0.1.user.js) |
+| 2.0.0 | Straight-run collecting, post high score | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.0.0.user.js) |
+| 1.9.0 | First GitHub version | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v1.9.0.user.js) |
 
 ## How it hooks into the game
 

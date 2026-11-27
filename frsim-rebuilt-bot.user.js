@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.1.3
+// @version      2.1.4
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,8 +11,42 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.1.3';
+  const VERSION = '2.1.4';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
+
+  // ---------------------------------------------------------------------------
+  // 0. Bot runs never go on the leaderboard. A match the bot drove (even part of) is never posted: the game's
+  //    "rebuiltPost" leaderboard message isn't sent (the game is told why), and its replay isn't uploaded to the
+  //    server. Matches you drive yourself with the bot off post as normal. Saving replays in this browser still works.
+  // ---------------------------------------------------------------------------
+  const NO_POST = { drove: false, blocked: 0, shown: 0 };
+  try {
+    const wsSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (NO_POST.drove && typeof data === 'string' && /"t"\s*:\s*"rebuiltPost"/.test(data)) {
+        NO_POST.blocked++;
+        const ws = this;
+        setTimeout(() => {
+          try { if (ws.onmessage) ws.onmessage({ data: JSON.stringify({ t: 'error', msg: 'Not posted: the bot drove this match' }) }); } catch (_) {}
+          try { ws.close(); } catch (_) {}
+        }, 30);
+        return undefined;
+      }
+      return wsSend.call(this, data);
+    };
+    const pageFetch = window.fetch;
+    window.fetch = function (input, init) {
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const method = (init && init.method) || (input && input.method) || 'GET';
+        if (NO_POST.drove && /rebuilt-replays/.test(url) && /^post$/i.test(method)) {
+          NO_POST.blocked++;
+          return Promise.resolve(new Response(JSON.stringify({ error: 'Not uploaded: the bot drove this match' }), { status: 403, headers: { 'content-type': 'application/json' } }));
+        }
+      } catch (_) {}
+      return pageFetch.apply(this, arguments);
+    };
+  } catch (_) {}
 
   // ---------------------------------------------------------------------------
   // 1. Hook the game's module loader so we can read the live match state.
@@ -1216,6 +1250,13 @@
   };
 
   const tick = () => {
+    // leaderboard guard: a match counts as the bot's if the bot is on at any point while it's being played
+    {
+      const g0 = findGame(), ph0 = g0 && g0.view && g0.view.phase;
+      if (ph0 === 'pre' || ph0 === 'countdown') NO_POST.drove = !!SETTINGS.enabled; // a new match: starts fresh
+      else if (SETTINGS.enabled && PLAY_PHASES.includes(ph0)) NO_POST.drove = true;
+      if (NO_POST.blocked !== NO_POST.shown) { NO_POST.shown = NO_POST.blocked; B.note = 'Not posted to the leaderboard — the bot drove this match'; }
+    }
     const now = performance.now();
     if (B.note !== B.prevNote) { B.prevNote = B.note; B.noteAt = now; }
     else if (B.note && now - B.noteAt > 6000 && !/^Match/.test(B.note)) B.note = '';
@@ -2962,7 +3003,7 @@
   window.addEventListener('blur', () => releaseAll());
 
   // handy for debugging from the console
-  window.__frsimBot = { version: VERSION, B, get MEM() { return MEM; }, findGame, findRobotConfig, analyzeReplay, readSavedReplays, describeLesson, learnFromLeaderboard, applyReplayLesson, findReplayLib, findBoardLib, onlineState,
+  window.__frsimBot = { version: VERSION, B, get MEM() { return MEM; }, findGame, findRobotConfig, analyzeReplay, readSavedReplays, describeLesson, learnFromLeaderboard, applyReplayLesson, findReplayLib, findBoardLib, onlineState, NO_POST,
     get hooked() { return { early: EXPORTS.length, cache: !!CACHE }; } };
   const ME = window.__frsimBot;
   // Driving starts first and never depends on the panel: a panel problem can't stop the bot.
