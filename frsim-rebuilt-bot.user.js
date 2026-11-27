@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.1.2
+// @version      2.1.3
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.1.2';
+  const VERSION = '2.1.3';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -1279,6 +1279,10 @@
     // to dump on its own (5460 is a dumper with a turret).
     info.lidX = hasLid(cfg, robot.team);
     info.dumper = DUMPER_TEAMS.has(robot.team) || info.minR <= 1.0;
+    // A dumper with a turret (5460) plays like a dumper: full loads, stop and dump at the hub, no shooting on the move.
+    // Its turret only matters for aiming.
+    info.turretPlay = info.turret && !info.dumper;
+    info.moveShoot = info.moveShoot && !info.dumper;
     // Turrets that can't spin all the way round (971, 118, 5460): the chassis has to point the turret's swing at the target
     const tRange = cfg && cfg.shooter && cfg.shooter.turret && cfg.shooter.turret.range;
     info.turretHalfArc = info.turret && tRange && tRange[0] != null && tRange[1] != null && tRange[1] - tRange[0] < 2 * Math.PI - 0.1 ? (tRange[1] - tRange[0]) / 2 : null;
@@ -1437,7 +1441,7 @@
     // turrets aim themselves. Once a pass has started, small drifts don't cancel it (no back-and-forth).
     const midPass = B.mode === 'passing';
     const canPass = depth > ZONE_DEPTH + (midPass ? 0.25 : 0.45) && depth < 2 * FIELD.halfX - ZONE_DEPTH - 0.45 &&
-      (info.turret || Math.abs(me.z) > (midPass ? 0.7 : 1.2)) && now > (B.passMoveUntil || 0);
+      (info.turretPlay || Math.abs(me.z) > (midPass ? 0.7 : 1.2)) && now > (B.passMoveUntil || 0);
     // dumpers only make the trip with a full hopper (90%+); everyone else uses what they've learned (and the top-off
     // rule below). The deadlines further down are exceptions for both.
     const minLoad = Math.max(1, Math.round((info.dumper ? Math.max(P.minLoadFrac, 0.9) : P.minLoadFrac) * cap));
@@ -1447,7 +1451,7 @@
     let spotNow = shootSpot(me, PS);
     // Coming in from the neutral zone: shoot from just inside our zone, right where we cross in (behind the
     // bump, or at the trench exit), the way the top players do, instead of driving deep into the zone.
-    if (!info.turret && view.phase !== 'auto') {
+    if (!info.turretPlay && view.phase !== 'auto') {
       let ez = clamp(me.z, -FIELD.halfZ + info.halfW + 0.12, FIELD.halfZ - info.halfW - 0.12);
       if (Math.abs(ez) < 1.25) ez = (ez >= 0 ? 1 : -1) * 1.8; // the hub is in the way: the bump beside it
       const q = { x: wallX + inward * (ZONE_DEPTH - 0.62), z: ez };
@@ -1464,7 +1468,7 @@
         if (d < bd) { bd = d; bestQ = w; }
       }
       if (bestQ && bd < spotNow.d + 0.6) spotNow = { ...bestQ, d: bd }; // their spot, unless it's well out of our way
-    } else if (info.turret && view.phase !== 'auto') {
+    } else if (info.turretPlay && view.phase !== 'auto') {
       // a turret aims itself: the nearest point inside our zone that's in range will do
       const maxDepth = ZONE_DEPTH - 0.6;
       let qx = (me.x - wallX) * inward > maxDepth ? wallX + inward * maxDepth : me.x;
@@ -1483,7 +1487,7 @@
       if (dq > info.minR + 0.3 && dq < info.maxR - 0.6) spotNow = { ...q, d: Math.hypot(q.x - me.x, q.z - me.z) };
     }
     // on the way in, don't keep swapping between two spots (that's how robots end up wiggling at the bump)
-    if (!info.turret && B.mode === 'to-hub' && B.lastSpot && Math.hypot(B.lastSpot.x - spotNow.x, B.lastSpot.z - spotNow.z) > 0.5) {
+    if (!info.turretPlay && B.mode === 'to-hub' && B.lastSpot && Math.hypot(B.lastSpot.x - spotNow.x, B.lastSpot.z - spotNow.z) > 0.5) {
       const dl = Math.hypot(B.lastSpot.x - me.x, B.lastSpot.z - me.z);
       if (dl < spotNow.d + 0.8 && !robotNear(B.lastSpot.x, B.lastSpot.z, 1.0)) spotNow = { x: B.lastSpot.x, z: B.lastSpot.z, d: dl };
     }
@@ -1583,7 +1587,7 @@
     // the same as teleop fuel, so a full load still counts if it's fired a few seconds later)
     // auto: dumpers come back full; others when topping up stops paying off (autoNeedShoot), or at 90%
     const autoShoot = view.phase === 'auto' && hop > 0 && (B.autoNeedShoot || B.mode === 'shooting' || B.mode === 'shooting on the move' || hop >= cap * 0.9);
-    const turretSweep = info.turret && timing.active && view.phase !== 'auto' && inRangeNow && (B.zoneFuel || 0) >= 8 &&
+    const turretSweep = info.turretPlay && timing.active && view.phase !== 'auto' && inRangeNow && (B.zoneFuel || 0) >= 8 &&
       turretChassisYaw(hub.x, hub.z) == null && hop < cap - 1;
     const goShoot = !turretSweep && !defendNow && !wantPass && !passing && hop > 0 && (autoShoot || graceShooting ||
       (fullEarly && reloading && timeToDepart <= 3) || // full and nearly time anyway: head in, get set to fire
@@ -1651,7 +1655,7 @@
       const act = track[k][4] | track[Math.min(track.length - 1, k + 1)][4] | (B.rkStillFrom != null ? (B.rkFired || 0) & 3 : 0);
       const inZoneNow = depth < ZONE_DEPTH - 0.5;
       const shootNow = !!(act & 1) && inZoneNow && hop > 0, passNow = !!(act & 2) && !inZoneNow && hop > 0;
-      if (shootNow || passNow) { if (info.turret) { vx *= 0.3; vz *= 0.3; } else { vx = 0; vz = 0; } } // stopped to fire (turrets may creep)
+      if (shootNow || passNow) { if (info.turretPlay) { vx *= 0.3; vz *= 0.3; } else { vx = 0; vz = 0; } } // stopped to fire (turrets may creep)
       sendKey('Space', shootNow || passNow); // the game aims; in our zone it scores, outside it passes
       sendKey('KeyE', false);
       sendKey('ShiftLeft', !(shootNow || passNow) || info.dumper || !!(act & 4));
@@ -1667,7 +1671,7 @@
     // scooping the depot (that fuel goes up as soon as teleop starts)
     const depotR = rectFor('depot', robot.alliance);
     if (view.phase !== 'auto') B.fin = null;
-    if (view.phase === 'auto' && info.turret && !B.fin && (B.autoVolleys || 0) >= 2 && (view.clock || 0) > 2.5) {
+    if (view.phase === 'auto' && info.turretPlay && !B.fin && (B.autoVolleys || 0) >= 2 && (view.clock || 0) > 2.5) {
       let dn = 0; const F = view.fuel, Wh = F && F.where && F.where.length >= F.count ? F.where : null;
       if (F && F.pos) for (let k = 0; k < F.count; k++) if ((!Wh || Wh[k] <= 1) && inRect(depotR, F.pos[3 * k], F.pos[3 * k + 2], 0.15)) dn++;
       if (dn >= 6) { B.fin = { stage: 'go', t: now }; B.note = `Auto: shooting on the move to the depot (${dn} fuel there)`; }
@@ -1900,7 +1904,7 @@
       B.task = null;
       if (B.mode === 'passing' && canPass) { sendKey('KeyE', false); sendKey('ShiftLeft', true); } // pass and intake at the same time
       else intakeIdle();
-      const onMove = info.turret && info.turretHalfArc == null; // full-circle turrets keep driving to the next pile while they pass
+      const onMove = info.turretPlay && info.turretHalfArc == null; // full-circle turrets keep driving to the next pile while they pass
       if (canPass) {
         if (B.mode !== 'passing') { B.passStart = now; B.passHop = rawHop; }
         B.mode = 'passing';
@@ -1948,7 +1952,7 @@
       const distHub = Math.hypot(hub.x - me.x, hub.z - me.z);
       const behind0 = inOurZone;
       const fireOK = timing.active || inGrace || (offShift && view.phase !== 'auto' && timing.untilActive <= P.preFire);
-      const turretHere = info.turret && fireOK && behind0 && distHub > info.minR + 0.15 && distHub < info.maxR - 0.4;
+      const turretHere = info.turretPlay && fireOK && behind0 && distHub > info.minR + 0.15 && distHub < info.maxR - 0.4;
       if (turretHere && !B.turretStop) B.turretStop = { x: me.x + (me.vx || 0) * 0.25, z: me.z + (me.vz || 0) * 0.25 };
       if (!turretHere) B.turretStop = null;
       const spot = B.turretStop || spotNow; // a turret aims itself, so any in-range spot will do
@@ -1958,7 +1962,7 @@
       const harvesting = timing.active && view.phase !== 'auto' && (B.zoneFuel || 0) >= 15;
       const inRange = distHub > info.minR + 0.15 && distHub < (harvesting ? info.maxR - 0.7 : Math.min(PS.shootDist + 0.8, info.maxR - 0.3)) && behindHub;
       const inRangeWide = distHub > info.minR + 0.15 && distHub < info.maxR - 0.4 && behindHub; // anywhere the shooter can reach
-      const atSpot = r.dGoal < 0.4 || (r.dGoal < 0.8 && speed < 0.3) || (fireOK && inRange && !info.turret) ||
+      const atSpot = r.dGoal < 0.4 || (r.dGoal < 0.8 && speed < 0.3) || (fireOK && inRange && !info.turretPlay) ||
         (B.turretStop && speed < 0.5);
       if (atSpot) {
         if (fireOK) { // hub on, or about to come on: start the volley so the first fuel lands as it lights up
@@ -1989,7 +1993,7 @@
           axis('fwd', 0, 'KeyW', 'KeyS'); axis('side', 0, 'KeyD', 'KeyA'); axis('rot', 0, 'KeyJ', 'KeyL');
           { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null) drive(0, 0, ty, yaw, sx); } // limited turret: point its swing at the hub
           setLid(false); // lid down while shooting: it feeds the shooter faster
-          if (!info.turret && speed > 0.7) { // came in fast: brake rather than coast past the spot
+          if (!info.turretPlay && speed > 0.7) { // came in fast: brake rather than coast past the spot
             const vm = Math.max(3, B.vmax || 4);
             axis('fwd', -((me.vx || 0) / vm) * 1.6 * sx, 'KeyW', 'KeyS'); axis('side', -((me.vz || 0) / vm) * 1.6 * sx, 'KeyD', 'KeyA');
           }
@@ -2044,13 +2048,13 @@
         B.mode = 'to-hub';
         if (r.dGoal < 2.5) setLid(false); // lid down before the volley
         // turn the shooter toward the hub on the way in, so it's already aimed when we get there
-        if (!info.turret) wantYaw = r.dGoal > 1.2 ? yawToFace(hub.x - spot.x, hub.z - spot.z, info.shooterSign) : yawToFace(hub.x - me.x, hub.z - me.z, info.shooterSign);
+        if (!info.turretPlay) wantYaw = r.dGoal > 1.2 ? yawToFace(hub.x - spot.x, hub.z - spot.z, info.shooterSign) : yawToFace(hub.x - me.x, hub.z - me.z, info.shooterSign);
         else if (r.dGoal < 3) { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null) wantYaw = ty; }
       }
       B.nearGoal = r.dGoal < 0.5;
     } else {
       // turrets can shoot from anywhere in range: keep firing while collecting if our hub is on
-      const turretFireHere = info.turret && hop > 0 && view.phase !== 'auto' && inRangeNow && turretChassisYaw(hub.x, hub.z) == null &&
+      const turretFireHere = info.turretPlay && hop > 0 && view.phase !== 'auto' && inRangeNow && turretChassisYaw(hub.x, hub.z) == null &&
         (timing.active || inGrace || (offShift && timing.untilActive <= P.preFire));
       sendKey('Space', turretFireHere);
       sendKey('KeyE', false); // intake out to collect / clean walls
@@ -2841,7 +2845,7 @@
     els.a_copypros.classList.toggle('on', !!SETTINGS.replicatePros);
 
     const cfg = robot && findRobotConfig(robot.team);
-    const kind = B.info ? [B.info.turret && 'turret', B.info.blocker && 'blocker'].filter(Boolean).join(', ') : '';
+    const kind = B.info ? [B.info.turret && (B.info.dumper ? 'turret dumper' : 'turret'), !B.info.turret && B.info.dumper && 'dumper', B.info.lidX && 'expandable hopper', B.info.blocker && 'blocker'].filter(Boolean).join(', ') : '';
     els.team.textContent = robot ? `${robot.team}${cfg && cfg.name ? ' · ' + cfg.name : ''}${kind ? ' · ' + kind : ''}${B.multiplayer ? ' · MP' : ''}` : '';
 
     // now
