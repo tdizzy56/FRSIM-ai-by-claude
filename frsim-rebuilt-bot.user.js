@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.1.1
+// @version      2.1.2
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.1.1';
+  const VERSION = '2.1.2';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -251,8 +251,8 @@
     const aim = turret ? ((br.maxShotSpeed || 0) >= 2 ? 'turret-move' : 'turret') : 'chassis';
     const cap = (c.hopper && c.hopper.capacity) || 50;
     const size = cap >= 80 ? 'big' : cap >= 50 ? 'mid' : 'small';
-    const lid = lidTeams().has(team);
-    const dumper = (!!(c.hopper && c.hopper.net && c.hopper.net.lift) && !lid) || (br.minRange || 1.4) <= 1.0;
+    const lid = hasLid(c, team);
+    const dumper = DUMPER_TEAMS.has(team) || (br.minRange || 1.4) <= 1.0;
     const tr = turret && c.shooter.turret.range, limited = tr && tr[0] != null && tr[1] != null && tr[1] - tr[0] < 2 * Math.PI - 0.1;
     return `${aim}${limited ? '-arc' : ''}/${size}${dumper ? '/dumper' : ''}${lid ? '/lid' : ''}`;
   };
@@ -571,7 +571,7 @@
   const taps = new Map();
   const tapKey = (code, now) => {
     if (taps.has(code) || now - (tapKey.last[code] || 0) < 450) return;
-    tapKey.last[code] = now; sendKey(code, true); taps.set(code, now + 70);
+    tapKey.last[code] = now; sendKey(code, true); taps.set(code, now + 130); // long enough for a slow frame to see it
   };
   tapKey.last = {};
   const releaseTaps = (now) => { for (const [k, t] of taps) if (now >= t) { sendKey(k, false); taps.delete(k); } };
@@ -992,7 +992,8 @@
       bumpOnly: !!(B.multiplayer && SETTINGS.bumpOnly), side: Math.random() < 0.5 ? 1 : -1, started: Date.now(),
     };
     B.path = []; B.target = null; B.task = null; B.jam = 0; B.defTarget = null; B.autoSwipes = 0; B.autoNeedShoot = false;
-    B.cycleStart = performance.now(); B.hadFuel = false; B.topOffWorth = true; B.autoVolleys = 0; B.fin = null; B.lidBase = null;
+    if (MEM.effCap && MEM.effCap[me.team]) MEM.effCap[me.team] += 2;
+    B.cycleStart = performance.now(); B.hadFuel = false; B.topOffWorth = true; B.autoVolleys = 0; B.fin = null; B.lidBase = null; B.lidCmd = null;
   };
 
   const fuelPoints = (sc) => (sc.autoFuel || 0) + (sc.teleFuel || 0);
@@ -1276,8 +1277,8 @@
     // Expandable hoppers: the game's "Robot special" key raises a lid so the hopper holds more (1678 today; the list
     // comes from the game's own control hint). Dumpers: robots that shoot from right up close, or whose hopper lifts
     // to dump on its own (5460 is a dumper with a turret).
-    info.lidX = lidTeams().has(robot.team);
-    info.dumper = (!!(cfg && cfg.hopper && cfg.hopper.net && cfg.hopper.net.lift) && !info.lidX) || info.minR <= 1.0;
+    info.lidX = hasLid(cfg, robot.team);
+    info.dumper = DUMPER_TEAMS.has(robot.team) || info.minR <= 1.0;
     // Turrets that can't spin all the way round (971, 118, 5460): the chassis has to point the turret's swing at the target
     const tRange = cfg && cfg.shooter && cfg.shooter.turret && cfg.shooter.turret.range;
     info.turretHalfArc = info.turret && tRange && tRange[0] != null && tRange[1] != null && tRange[1] - tRange[0] < 2 * Math.PI - 0.1 ? (tRange[1] - tRange[0]) / 2 : null;
@@ -1303,7 +1304,12 @@
     B.nearTrenchNow = Math.abs(me.z) > 2.6 && Math.abs(me.x) > 2.3 && Math.abs(me.x) < 5.0; // in or right by a trench
     B.blockerUp = robot.state === 'BLOCKING';
     const sx = robot.alliance === 'blue' ? 1 : -1;
-    const cap = robot.hopperCapacity || 40;
+    // What the hopper really holds: some fill up before their listed capacity (5460 tops out in the high 30s).
+    // Learned per robot: lowered when the intake stops taking fuel, raised whenever it holds more.
+    const capRaw = robot.hopperCapacity || 40;
+    MEM.effCap = MEM.effCap || {};
+    if ((robot.hopperFuel || 0) >= (MEM.effCap[robot.team] || capRaw)) MEM.effCap[robot.team] = Math.min(capRaw, (robot.hopperFuel || 0) + 1);
+    const cap = Math.min(capRaw, MEM.effCap[robot.team] || capRaw);
     const rawHop = robot.hopperFuel || 0;
     // Fuel counting: the game's own hopper count, minus fuel we found jammed on the last volley
     // (that fuel is tried again on the next volley), and "full" also when the intake stops gaining.
@@ -1318,13 +1324,29 @@
     // net-topped hoppers once they're well filled (hard-topped ones like 2910 still fit when full).
     const wasNoTrench = B.noTrench;
     // expandable hopper: is the lid up? (its height compared with where it sat at the start of the match)
-    B.lidUp = false;
+    // (Fuel also bulges the lid a little on its own; only "most of the way to its full height" counts as raised.)
+    B.lidUp = false; B.lidTall = false;
     if (info.lidX && robot.net && robot.net.length) {
       let mx = -1e9; for (let i = 1; i < robot.net.length; i++) if (robot.net[i] > mx) mx = robot.net[i];
       B.lidBase = B.lidBase == null ? mx : Math.min(B.lidBase, mx);
-      B.lidUp = mx > B.lidBase + 0.006;
+      const netMax = (cfg && cfg.hopper && cfg.hopper.net && cfg.hopper.net.max) || B.lidBase + 0.2;
+      const measuredUp = mx > B.lidBase + 0.6 * (netMax - B.lidBase);
+      if (B.lidCmd == null) B.lidCmd = false; // every match starts with the lid down
+      // the game lowered it by itself (some robots do after a volley): follow that
+      if (B.lidCmd && !measuredUp && rawHop < cap * 0.3) { B.lidDownSince = B.lidDownSince || now; if (now - B.lidDownSince > 3000) B.lidCmd = false; }
+      else B.lidDownSince = 0;
+      B.lidUp = B.lidCmd || measuredUp;
+      B.lidTall = mx > TRENCH_CLEAR - 0.01; // any part of it above the trench roof
     }
-    B.noTrench = !fitsTrench(robot.team, rawHop / Math.max(1, cap)) || B.lidUp; // lid up: it won't go under a trench
+    B.noTrench = !fitsTrench(robot.team, rawHop / Math.max(1, cap)) || B.lidUp || B.lidTall; // lid up: it won't go under a trench
+    // Lid control. X toggles the lid, so remember which way we last asked for and only press when we want the other
+    // way (pressing again while it's still moving would just flip the request back). The game also lowers it by itself
+    // after a volley, and a full hopper can hold it up until there's room: re-sync with what it really is when it's
+    // stayed that way a while.
+    const setLid = (up) => {
+      if (!info.lidX) return;
+      if (up !== B.lidCmd && now - (B.lidTapAt || 0) > 600) { tapKey('KeyX', now); B.lidTapAt = now; B.lidCmd = up; }
+    };
     // A turret that can't spin all the way round: the chassis heading that puts (tx, tz) in the middle of its swing,
     // or null when the target is already comfortably inside the swing (then the turret does the aiming).
     const turretChassisYaw = (tx, tz) => {
@@ -1966,7 +1988,7 @@
           }
           axis('fwd', 0, 'KeyW', 'KeyS'); axis('side', 0, 'KeyD', 'KeyA'); axis('rot', 0, 'KeyJ', 'KeyL');
           { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null) drive(0, 0, ty, yaw, sx); } // limited turret: point its swing at the hub
-          if (info.lidX && B.lidUp && now - (B.lidTapAt || 0) > 1200) { tapKey('KeyX', now); B.lidTapAt = now; } // lid down: feeds the shooter faster
+          setLid(false); // lid down while shooting: it feeds the shooter faster
           if (!info.turret && speed > 0.7) { // came in fast: brake rather than coast past the spot
             const vm = Math.max(3, B.vmax || 4);
             axis('fwd', -((me.vx || 0) / vm) * 1.6 * sx, 'KeyW', 'KeyS'); axis('side', -((me.vz || 0) / vm) * 1.6 * sx, 'KeyD', 'KeyA');
@@ -2016,10 +2038,11 @@
         stow(false);
         B.mode = 'shooting on the move';
         { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null) wantYaw = ty; }
-        if (info.lidX && B.lidUp && now - (B.lidTapAt || 0) > 1200) { tapKey('KeyX', now); B.lidTapAt = now; }
+        setLid(false);
       } else {
         sendKey('Space', false);
         B.mode = 'to-hub';
+        if (r.dGoal < 2.5) setLid(false); // lid down before the volley
         // turn the shooter toward the hub on the way in, so it's already aimed when we get there
         if (!info.turret) wantYaw = r.dGoal > 1.2 ? yawToFace(hub.x - spot.x, hub.z - spot.z, info.shooterSign) : yawToFace(hub.x - me.x, hub.z - me.z, info.shooterSign);
         else if (r.dGoal < 3) { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null) wantYaw = ty; }
@@ -2047,7 +2070,10 @@
           if (Wh ? Wh[k] > 1 : F.pos[3 * k + 1] >= 0.2) continue; // in our hopper (or anywhere off the floor): not a jam
           if (Math.hypot(F.pos[3 * k] - mx, F.pos[3 * k + 2] - mz) < 0.45) near++;
         }
-        if (near >= 2) {
+        if (near >= 2 && rawHop >= capRaw * 0.3) {
+          MEM.effCap[robot.team] = Math.max(Math.round(capRaw * 0.3), rawHop); saveMem();
+          B.note = `Hopper full at ${rawHop} — going to shoot`;
+        } else if (near >= 2) {
           const again = B.unjamSpot && Math.hypot(B.unjamSpot.x - me.x, B.unjamSpot.z - me.z) < 0.8 && now - B.unjamSpot.t < 8000;
           B.unjamSpot = { x: me.x, z: me.z, t: now, n: again ? B.unjamSpot.n + 1 : 1 };
           if (B.unjamSpot.n >= 3) {
@@ -2056,7 +2082,8 @@
           } else { B.unjamAt = now; B.unjamUntil = now + 350; B.note = 'Intake jammed — spitting it out'; }
         }
       }
-      if (info.lidX && !B.lidUp && rawHop >= cap * 0.4 && !B.nearTrenchNow && now - (B.lidTapAt || 0) > 1500) { tapKey('KeyX', now); B.lidTapAt = now; }
+      if (rawHop >= cap * 0.4 && !B.nearTrenchNow && !turretFireHere) setLid(true); // collecting (not firing): lid up to hold more
+      else if (turretFireHere) setLid(false); // firing while it collects: lid down feeds the shooter faster
       // pick (or keep) a collection task
       // where to look: near the hub when reloading, out in the neutral zone when there is free time
       const anchorW = freeTime ? 0.8 : 0;
@@ -2338,7 +2365,11 @@
   const visibleButtons = () => [...document.querySelectorAll('button, [role="button"], a')]
     .filter((x) => !x.closest('#frsim-bot-host') && x.offsetParent !== null);
   let roomSniffAt = 0;
-  // robots whose hopper lid goes up on the "Robot special" key, read from the game's own control hint
+  // Expandable hoppers: a hopper "lid" that lifts on the "Robot special" key (X). Both 1678 and 5460 work this way
+  // (the game's hint only names 1678), so it's read from each robot's own setup, plus any team the hint names.
+  const hasLid = (c, team) => !!(c && c.hopper && c.hopper.net && c.hopper.net.part === 'lid' && c.hopper.net.lift) || lidTeams().has(team);
+  // dumpers that don't show it in their setup (5460 is a dumper with a turret and an expandable hopper)
+  const DUMPER_TEAMS = new Set([5460]);
   let LID_TEAMS = null;
   const lidTeams = () => {
     if (LID_TEAMS) return LID_TEAMS;
@@ -2347,7 +2378,7 @@
     try { for (const L of EXPORTS) for (let i = 0; i < L.length; i++) { let v = L[i + 1]; if (v === 0) v = L[i + 2]; scan(v); } } catch (_) {}
     try { if (CACHE) for (const mod of CACHE.values()) { const ex = mod && mod.exports; if (ex && typeof ex === 'object') for (const k of Object.keys(ex)) scan(ex[k]); } } catch (_) {}
     if (found.size) LID_TEAMS = found; // (before the game has loaded, use what we know without caching it)
-    return found.size ? found : new Set([1678]);
+    return found.size ? found : new Set();
   };
   // the game's online-play store (rooms, chat, ping, and whether this is a ranked match)
   let ONLINE = null;

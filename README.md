@@ -70,9 +70,13 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
   robots it helps. Sweeping their own zone (the back wall) with the hub on, they keep the intake running and fire on
   the move instead of stopping to shoot. Every robot keeps just clear of the tower (no trips into its pocket). Turrets that can't spin all the way round (971, 118, 5460) turn the chassis to keep the hub in
   their swing.
-- Dumpers (1833, 2481, and 5460, which is a dumper with a turret) keep intaking except while shooting.
-- Expandable hoppers (1678): the lid goes up while collecting to hold more, it's bump-only while the lid is up, and the
-  lid comes down when shooting, which feeds the shooter faster.
+- Dumpers (1833, 2481, and 5460, which is a dumper with a turret and an expandable hopper) keep intaking except while
+  shooting.
+- Expandable hoppers (1678, 5460): the lid goes up while collecting to hold more (5460 fills to 69 instead of the
+  high 40s), it's bump-only while the lid is up, and the lid comes down before shooting, which feeds the shooter
+  faster.
+- Learns how much each hopper really holds, so a hopper that fills early is treated as full (and never as an
+  "intake jam" that spits fuel back out).
 - Trenches only when the robot fits under the roof. 2910, 1690, 118, 1323, 1360, 5000, 1678 and 5460 go under even when
   full with the hopper down; the intake and hopper are kept down near trenches.
 - Wall, tower and depot cleaning, intake-jam recovery, pin detection, trench back-out.
