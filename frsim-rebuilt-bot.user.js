@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.1.4
+// @version      2.2.0
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.1.4';
+  const VERSION = '2.2.0';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -764,6 +764,8 @@
       }
       // spots we tried and couldn't pick up (wedged against something): leave them alone for a while
       if (B.badFuel && B.badFuel.some((q) => Math.hypot(q.x - x, q.z - z) < 0.55)) continue;
+      // our own pile, while the hub is off (we're building it, not eating it)
+      if (B.avoidPile && B.pileSpot && Math.hypot(B.pileSpot.x - x, B.pileSpot.z - z) < 1.4) continue;
       if ((Math.abs(x - ownHub.x) < HUB_HALF + 0.1 && Math.abs(z) < HUB_HALF + 0.1) ||
           (Math.abs(x - oppHub.x) < HUB_HALF + 0.1 && Math.abs(z) < HUB_HALF + 0.1)) continue;
       out.push(x, z);
@@ -804,6 +806,11 @@
         const nearWall = Math.abs(fuel[i]) > FIELD.halfX - 0.3 || Math.abs(fuel[i + 1]) > FIELD.halfZ - 0.3;
         if (Math.abs(rz * dx - rx * dz) > corridor + (nearWall ? 0.08 : 0)) continue;
         ts.push([t, o.weight ? o.weight(fuel[i], fuel[i + 1]) : 1]);
+      }
+      if (o.extra) for (const [ex0, ez0, ew] of o.extra) { // fuel we expect to land here soon (out of our hub)
+        const rx = ex0 - x0, rz = ez0 - z0, t = rx * dx + rz * dz;
+        if (t < (pre ? -0.3 : 0.15) || t > 5.6 || Math.abs(rz * dx - rx * dz) > corridor) continue;
+        ts.push([t, ew]);
       }
       if (ts.length < 2) return null;
       ts.sort((p, q) => p[0] - q[0]);
@@ -881,6 +888,10 @@
       if (t < 0 || t > left + o.reach + 0.1) continue;
       const nearWall = Math.abs(fuel[i]) > FIELD.halfX - 0.3 || Math.abs(fuel[i + 1]) > FIELD.halfZ - 0.3;
       if (Math.abs(rz * T.dx - rx * T.dz) <= o.mouth + 0.09 + (nearWall ? 0.08 : 0)) n += o.weight ? o.weight(fuel[i], fuel[i + 1]) : 1;
+    }
+    if (o.extra) for (const [ex0, ez0, ew] of o.extra) {
+      const rx = ex0 - me.x, rz = ez0 - me.z, t = rx * T.dx + rz * T.dz;
+      if (t >= 0 && t <= left + o.reach + 0.1 && Math.abs(rz * T.dx - rx * T.dz) <= o.mouth + 0.09) n += ew;
     }
     if (n < 1) return null;
     const got = Math.min(n, o.capLeft);
@@ -1028,6 +1039,7 @@
     B.path = []; B.target = null; B.task = null; B.jam = 0; B.defTarget = null; B.autoSwipes = 0; B.autoNeedShoot = false;
     if (MEM.effCap && MEM.effCap[me.team]) MEM.effCap[me.team] += 2;
     B.cycleStart = performance.now(); B.hadFuel = false; B.topOffWorth = true; B.autoVolleys = 0; B.fin = null; B.lidBase = null; B.lidCmd = null;
+    B.pileT = null; B.pileSide = 0; B.pileFails = 0; B.avoidPile = false;
   };
 
   const fuelPoints = (sc) => (sc.autoFuel || 0) + (sc.teleFuel || 0);
@@ -1485,7 +1497,8 @@
       (info.turretPlay || Math.abs(me.z) > (midPass ? 0.7 : 1.2)) && now > (B.passMoveUntil || 0);
     // dumpers only make the trip with a full hopper (90%+); everyone else uses what they've learned (and the top-off
     // rule below). The deadlines further down are exceptions for both.
-    const minLoad = Math.max(1, Math.round((info.dumper ? Math.max(P.minLoadFrac, 0.9) : P.minLoadFrac) * cap));
+    // (everyone else heads in early only when the top-off rule says topping up has stopped paying off)
+    const minLoad = Math.max(1, Math.round(0.9 * cap));
     // "Copy the pros": what we learned from top replays for this robot (blue-side coordinates)
     const pro = MEM.copy ? MEM.copy[robot.team] : null;
     const W = (q) => (robot.alliance === 'blue' ? { x: q[0], z: q[1] } : { x: -q[0], z: -q[1] });
@@ -1616,7 +1629,12 @@
     if (!offShift) B.passFails = 0;
     const passBanned = (B.passFails || 0) >= 2; // passes keep failing this off shift: stop trying
     const keepForDefense = defenseOn && oppActive && offShift; // going to defend with a full hopper: don't pass it away
-    const wantPass = !defendNow && !graceShooting && !passBanned && !keepForDefense && hop >= 3 && ((freeTime && hop >= P.passLoad * cap) || (fullEarly && reloading && timeToDepart > 3));
+    // Pile builders (everyone but robots that shoot on the move): with the hub off and time to spare, bring full loads
+    // home and drop them in one tight pile beside our shooting spot, instead of passing them loosely.
+    const pileBot = !info.turretPlay;
+    const pileTime = timing.untilActive > RETURN_AT + travel + P.prepTime + 5;
+    const wantPile = pileBot && offShift && freeTime && !defendNow && !graceShooting && pileTime && (B.pileFails || 0) < 2;
+    const wantPass = !(wantPile && hop < cap * 0.85) && !defendNow && !graceShooting && !passBanned && !keepForDefense && hop >= 3 && ((freeTime && hop >= P.passLoad * cap) || (fullEarly && reloading && timeToDepart > 3));
 
     const dHubNow = Math.hypot(hub.x - me.x, hub.z - me.z);
     const inOurZone = depth < ZONE_DEPTH - 0.5; // whole robot inside our alliance zone (else the game makes it a pass)
@@ -1940,6 +1958,38 @@
     }
     if (robot.state === 'BLOCKING') tapKey('KeyX', now); // blocker away whenever we're not defending
 
+    // build the pile: full load -> stand a metre from the pile spot, intake toward it, and outtake the whole load
+    B.pileSpot = { x: wallX + inward * (ZONE_DEPTH - 1.7), z: (B.pileSide || (B.pileSide = me.z >= 0 ? 1 : -1)) * 1.5 };
+    B.avoidPile = offShift; // don't collect our own pile back up while the hub is off
+    if ((wantPile && hop >= cap * 0.85 && !passing) || (B.pileT && !mustHead && offShift)) {
+      B.task = null;
+      const PS0 = B.pileSpot, stand = { x: PS0.x + inward * 0.95, z: PS0.z };
+      const towardPile = yawToFace(-inward, 0, mouthSign);
+      if (!B.pileT) B.pileT = { stage: 'go', t: now };
+      const T = B.pileT;
+      sendKey('Space', false);
+      if (T.stage === 'go') {
+        intakeIdle(); sendKey('KeyQ', false);
+        const r = followTo(now, me, stand, P, true);
+        vx = r.vx; vz = r.vz;
+        wantYaw = r.dGoal < 2.5 ? towardPile : null;
+        if ((r.dGoal < 0.35 && Math.abs(wrap(towardPile - yaw)) < 0.3) || (r.dGoal < 0.7 && now - T.t > 6000)) { T.stage = 'drop'; T.t = now; T.hop0 = rawHop; }
+        if (now - T.t > 9000) { B.pileT = null; B.pileFails = (B.pileFails || 0) + 1; }
+        B.mode = 'to the pile';
+      } else {
+        sendKey('ShiftLeft', false); sendKey('KeyE', false); sendKey('KeyQ', true); // outtake: the load rolls out onto the pile
+        wantYaw = towardPile;
+        B.mode = 'building the pile';
+        if (rawHop <= 3 || now - T.t > 3800) { sendKey('KeyQ', false); B.pileT = null; B.match && (B.match.piled = (B.match.piled || 0) + (T.hop0 - rawHop)); }
+      }
+      B.nearGoal = true;
+      drive(vx, vz, wantYaw, yaw, sx);
+      B.wantMove = false; B.lastCmd = null;
+      return;
+    }
+    if (B.pileT) { B.pileT = null; sendKey('KeyQ', false); } // ran out of time mid-trip: keep the load for the shift
+    if (!(now < (B.unjamUntil || 0))) sendKey('KeyQ', false);
+
     if (passing || wantPass) {
       // Our hub is off: lob fuel into our alliance zone from the neutral zone and go get more.
       B.task = null;
@@ -2181,6 +2231,20 @@
             : view.phase !== 'auto' && timing.active && isFinite(timing.untilInactive) && timing.untilInactive < 20 ? timing.untilInactive + P.postFire * 0.5 : null;
           if (tEnd != null) { o.deadline = tEnd; o.hop = rawHop; o.fireRate = fireRate; }
           if (view.phase === 'auto' && info.dumper) o.preferFill = true; // dumpers in auto: one pass that fills the hopper
+          // Fuel that went into our hub comes back out of its front face and fans out over the floor in front of it
+          // (about 0.9 to 3 m out, 2 m either side) within a couple of seconds: plan to sweep it as it lands, the way
+          // the top players loop shoot -> sweep the hub's outflow -> shoot.
+          {
+            const Fv = view.fuel, Wh = Fv && Fv.where && Fv.where.length >= Fv.count ? Fv.where : null;
+            let n3 = 0;
+            if (Wh) for (let k = 0; k < Fv.count; k++) if (Wh[k] === 3 && Math.abs(Fv.pos[3 * k] - hub.x) < 1.0 && Math.abs(Fv.pos[3 * k + 2]) < 1.0) n3++;
+            if (n3 >= 4) {
+              const pts = [];
+              for (let d = 0.9; d <= 3.01; d += 0.42) for (let zz = -2.2; zz <= 2.21; zz += 0.44) pts.push([hub.x + inward * d, zz]);
+              const w = (0.7 * n3) / pts.length;
+              o.extra = pts.map(([px, pz]) => [px, pz, w]);
+            }
+          }
           const best = planRun(fuel, me, o);
           // (o.deadline is also used by rerateRun just below)
           // no run fits before the deadline: go and shoot what we have now, rather than wander and miss the buzzer
@@ -2520,7 +2584,7 @@
     'backing off': ['Backing off (no pin)', 'wait'], containing: ['Keeping them in their zone', 'bad'],
     'pushing back': ['Pushing them back', 'bad'],
     'escaping pin': ['Pinned — sliding out', 'bad'], 'bump defense': ['Ramming at the lane', 'bad'], 'guarding bump': ['Guarding the bump', 'bad'],
-    'guarding trench': ['Guarding the trench', 'bad'], 'copying a pro run': ['Copying a pro’s run', 'go'], 'holding (full)': ['Full — waiting to head back', 'wait'], 'clearing intake jam': ['Clearing intake jam', 'wait'], 'auto swipe': ['Auto swipe', 'go'], 'to the depot': ['Auto: to the depot', 'go'], 'releasing pin': ['Releasing pin (2 m back)', 'wait'],
+    'guarding trench': ['Guarding the trench', 'bad'], 'copying a pro run': ['Copying a pro’s run', 'go'], 'holding (full)': ['Full — waiting to head back', 'wait'], 'clearing intake jam': ['Clearing intake jam', 'wait'], 'auto swipe': ['Auto swipe', 'go'], 'to the depot': ['Auto: to the depot', 'go'], 'to the pile': ['Taking a load to the pile', 'go'], 'building the pile': ['Building the pile', 'go'], 'releasing pin': ['Releasing pin (2 m back)', 'wait'],
     off: ['Autopilot off', 'off'], 'waiting for a match': ['Waiting for a match', 'off'],
     'looking for the game': ['Looking for the game…', 'wait'], 'off in ranked': ['Off — Ranked is against real people', 'off'],
   };
