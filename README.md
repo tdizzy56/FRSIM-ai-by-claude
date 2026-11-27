@@ -60,7 +60,10 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 
 **Shifts**
 - Hub on: goes where the fuel is (neutral zone first, its own zone in the last 5 s of a shift).
-- Hub off: collects and passes, then comes back full and in position by 2 s before its shift.
+- Hub off: collects and passes, then comes back full and in position just before it starts firing for its shift
+  (no more sitting at its spot). With a full hopper and a few seconds to spare (teleop), it pushes loose fuel against
+  the side wall in front of its trench, and later sweeps that strip up with one run down the trench lane.
+- Hub on: fires the whole load before going for more (it only leaves early with a stuck ball if a big pile is waiting).
 - Fires ~2.5 s before its shift starts and keeps firing into the 3 s the hub still counts after it ends.
 - Endgame: plans its last runs so the run, the drive back and the whole volley fit before the buzzer.
 
@@ -104,6 +107,7 @@ learned stays in your browser either way.
 
 | Version | What it added | |
 | --- | --- | --- |
+| 2.2.3 | Empties the hopper before leaving the hub; turrets two full swipes in auto; fuel pushing; better return timing; 1:1 copy fixes | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.3.user.js) |
 | 2.2.2 | Slows down while firing on the move; turret auto: two swipes before the depot, leaves it when empty | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.2.user.js) |
 | 2.2.1 | Same play as 2.1.4 (the record experiments are taken out again) | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.1.user.js) |
 | 2.2.0 | Experimental: bigger loads, builds a pile while the hub is off | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.0.user.js) |

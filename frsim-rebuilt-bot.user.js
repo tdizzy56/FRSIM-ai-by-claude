@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.2.2
+// @version      2.2.3
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.2.2';
+  const VERSION = '2.2.3';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -856,7 +856,7 @@
     }
     // 2b) down the trench lanes, from either end (fuel piles up under the trenches)
     if (o.trench) for (const lz of [LANE_Z, -LANE_Z]) for (const sx2 of [1, -1]) for (const dir of [1, -1]) {
-      const x0 = sx2 * (dir === sx2 ? 2.35 : 4.95), z0 = lz, dx = dir * sx2 > 0 ? sx2 : -sx2;
+      const x0 = sx2 * (dir === sx2 ? 0.9 : 4.95), z0 = lz, dx = dir * sx2 > 0 ? sx2 : -sx2;
       if (!runClear(x0, z0, o.hw, true)) continue;
       const pre = Math.hypot(x0 - me.x, z0 - me.z) / o.v + 0.5;
       offer(evalLine(x0, z0, dx, 0, pre, 1));
@@ -1027,7 +1027,7 @@
     };
     B.path = []; B.target = null; B.task = null; B.jam = 0; B.defTarget = null; B.autoSwipes = 0; B.autoNeedShoot = false;
     if (MEM.effCap && MEM.effCap[me.team]) MEM.effCap[me.team] += 2;
-    B.cycleStart = performance.now(); B.hadFuel = false; B.topOffWorth = true; B.autoVolleys = 0; B.fin = null; B.lidBase = null; B.lidCmd = null;
+    B.cycleStart = performance.now(); B.hadFuel = false; B.topOffWorth = true; B.autoVolleys = 0; B.fin = null; B.lidBase = null; B.lidCmd = null; B.push = null;
   };
 
   const fuelPoints = (sc) => (sc.autoFuel || 0) + (sc.teleFuel || 0);
@@ -1540,11 +1540,13 @@
     // for going round the hub/bumps) at the speed this robot really reaches, plus time to get going.
     const straight = Math.hypot(spotNow.x - me.x, spotNow.z - me.z);
     const crossing = Math.sign(me.x - hub.x) !== Math.sign(spotNow.x - hub.x) ? 1.3 : 1.1;
-    const travel = ((straight * crossing) / Math.max(2.2, (B.vmax || 3.5) * 0.75)) * 1.25 + (crossing > 1.2 ? 1.8 : 1.0); // margin: better a second early than late
-    // a tighter estimate for the last volley of a period: drive at the speed we really reach, plus firing time
+    // a tight estimate (the speed we really reach, plus getting going), and a slightly padded one for heading home
     const fireRate = (cfg && cfg.shooter && cfg.shooter.fireRate) || 15;
     const fireTime = Math.min(hop, cap) / fireRate + 0.35;
     const travelTight = (straight * crossing) / Math.max(2.4, (B.vmax || 3.5) * 0.85) + 0.45;
+    const travel = travelTight * 1.15 + 0.5; // (it used to pad a lot more, and the robot sat waiting at its spot)
+    // be in position just before we start firing for our shift (not seconds early)
+    const ARRIVE = Math.max(RETURN_AT, (P.preFire || 2) + 0.2);
     const offShift = !timing.active;
     // The hub keeps counting fuel for 3 s after a shift ends: keep firing a little longer (fuel flies ~1 s).
     if (B.prevActive && !timing.active) B.hubOffAt = now;
@@ -1554,9 +1556,9 @@
     // be back in position BY 2 seconds left: leave when the trip home would just get us there
     if (!offShift) B.committedBack = false;
     // once we've started back we stay committed (the trip estimate shrinks as we get closer)
-    const mustHead = offShift && (timing.untilActive <= RETURN_AT + travel || B.committedBack);
+    const mustHead = offShift && (timing.untilActive <= ARRIVE + travel || B.committedBack);
     if (mustHead) B.committedBack = true;
-    const reloading = offShift && !mustHead && timing.untilActive <= RETURN_AT + travel + P.prepTime;
+    const reloading = offShift && !mustHead && timing.untilActive <= ARRIVE + travel + P.prepTime;
     const freeTime = offShift && !mustHead && !reloading;
 
     // --- defense (multiplayer only): when our hub is off and theirs is on, stop their shots ---
@@ -1603,7 +1605,7 @@
     // or 60%+ and the intake has stopped finding fuel for 2.5 s (a picked-over field may never fill a big hopper)
     const fullForDefense = full || (rawHop >= cap * 0.6 && now - (B.hopRiseAt || now) > 2500);
     const defendNow = !graceShooting && (defenseOnly || preDefend) || (defenseOn && offShift && !mustHead && oppActive && fullForDefense &&
-      now > (B.defPauseUntil || 0) && timing.untilActive > RETURN_AT + travel);
+      now > (B.defPauseUntil || 0) && timing.untilActive > ARRIVE + travel);
     if (!defendNow && B.mode && /^(defending|blocking shots|shoving|backing off)$/.test(B.mode)) {
       B.defTarget = null;
       if (robot.state === 'BLOCKING') tapKey('KeyX', now); // put the blocker away
@@ -1611,14 +1613,18 @@
 
     // finish a pass that has started
     const passing = !defendNow && B.mode === 'passing' && hop > 0 && now - B.passStart < 4000 &&
-      (freeTime || (reloading && timing.untilActive - (RETURN_AT + travel) > 2)); // finish the pass we started
-    const timeToDepart = timing.untilActive - (RETURN_AT + travel);
+      (freeTime || (reloading && timing.untilActive - (ARRIVE + travel) > 2)); // finish the pass we started
+    const timeToDepart = timing.untilActive - (ARRIVE + travel);
     const fullEarly = offShift && !mustHead && view.phase !== 'auto' && full;
     // full with time to spare: pass this load and refill, so we still come back with a full hopper
     if (!offShift) B.passFails = 0;
     const passBanned = (B.passFails || 0) >= 2; // passes keep failing this off shift: stop trying
     const keepForDefense = defenseOn && oppActive && offShift; // going to defend with a full hopper: don't pass it away
-    const wantPass = !defendNow && !graceShooting && !passBanned && !keepForDefense && hop >= 3 && ((freeTime && hop >= P.passLoad * cap) || (fullEarly && reloading && timeToDepart > 3));
+    // FUEL PUSHING (teleop): hub off, hopper full, a few seconds before heading home: bulldoze loose fuel against the side
+    // wall in front of our trench, so a straight run down the trench lane picks it all up later
+    const pushOK = view.phase !== 'auto' && offShift && !mustHead && full && !defendNow && !graceShooting && !B.noTrench &&
+      (reloading || passBanned) && timeToDepart > 1.5 && !(B.push && B.push.none && now - B.push.t < 2500);
+    const wantPass = !(pushOK && reloading) && !defendNow && !graceShooting && !passBanned && !keepForDefense && hop >= 3 && ((freeTime && hop >= P.passLoad * cap) || (fullEarly && reloading && timeToDepart > 3));
 
     const dHubNow = Math.hypot(hub.x - me.x, hub.z - me.z);
     const inOurZone = depth < ZONE_DEPTH - 0.5; // whole robot inside our alliance zone (else the game makes it a pass)
@@ -1630,10 +1636,11 @@
     // the same as teleop fuel, so a full load still counts if it's fired a few seconds later)
     // auto: dumpers come back full; others when topping up stops paying off (autoNeedShoot), or at 90%
     const autoShoot = view.phase === 'auto' && hop > 0 && (B.autoNeedShoot || B.mode === 'shooting' || B.mode === 'shooting on the move' || hop >= cap * 0.9);
+    // (only once the hopper's nearly empty: with the hub on, a load is fired before we go collecting again)
     const turretSweep = info.turretPlay && timing.active && view.phase !== 'auto' && inRangeNow && (B.zoneFuel || 0) >= 8 &&
-      turretChassisYaw(hub.x, hub.z) == null && hop < cap - 1;
+      turretChassisYaw(hub.x, hub.z) == null && hop <= Math.max(4, cap * 0.08);
     const goShoot = !turretSweep && !defendNow && !wantPass && !passing && hop > 0 && (autoShoot || graceShooting ||
-      (fullEarly && reloading && timeToDepart <= 3) || // full and nearly time anyway: head in, get set to fire
+      (fullEarly && reloading && timeToDepart <= 0.6) || // full and it's time: head in, get set to fire
       (timing.active && view.phase !== 'auto' && (hop >= minLoad || full ||
         (B.noRunSince && now - B.noRunSince > 2500 && hop >= 4) || // (nothing left worth collecting: shoot what we have)
         B.mode === 'shooting' || B.mode === 'shooting on the move' || // keep going once a volley has started
@@ -1674,6 +1681,7 @@
         let last = k, fired = 0; while (last + 1 < track.length && stillAt(last)) { fired |= track[last][4]; last++; }
         fired |= track[last][4];
         if ((fired & 3) && hop > 0 && k2 >= last && tM - track[last][0] < 2.3) k2 = Math.max(k, last - 1);
+        if ((fired & 3) && hop === 0) k2 = Math.min(track.length - 1, last + 1); // nothing to fire: no point standing here
         B.rkFired = fired;
         k = k2;
       } else {
@@ -1682,9 +1690,29 @@
         while (k + 1 < track.length && track[k + 1][0] <= tM + 0.25 && !stillAt(k) &&
           Math.hypot(P_(k + 1).x - me.x, P_(k + 1).z - me.z) <= Math.hypot(P_(k).x - me.x, P_(k).z - me.z) + 0.05) k++;
       }
-      k = Math.max(k, idxAt(tM - 2.5)); // too far behind: skip ahead
+      {
+        const kCap = idxAt(tM - 2.5); // too far behind: skip ahead...
+        if (kCap > k) {
+          let stop = -1; // ...but not past a spot where they fired, if we've got fuel to fire there too
+          if (hop >= Math.max(4, cap * 0.2)) for (let i = k + 1; i <= kCap; i++) if ((track[i][4] & 1) && stillAt(i)) { stop = i; break; }
+          k = stop >= 0 ? stop : kCap;
+        }
+      }
       B.rk = k;
-      const ka = Math.min(track.length - 1, k + 4), p0 = P_(k), pa = P_(ka);
+      const ka = Math.min(track.length - 1, k + 4), p0 = P_(k), pa0 = P_(ka);
+      let pa = pa0;
+      if (!(track[k][4] & 3) && hop < cap - 2) { // collecting along their line: lean (up to 0.4 m) toward fuel near it
+        let wx = 0, wz = 0, wn = 0; const Fv = view.fuel, Wh = Fv && Fv.where && Fv.where.length >= Fv.count ? Fv.where : null;
+        if (Fv && Fv.pos) for (let i = 0; i < Fv.count; i++) {
+          if ((Wh && Wh[i] > 1) || Fv.pos[3 * i + 1] > 0.25) continue;
+          const fx = Fv.pos[3 * i], fz = Fv.pos[3 * i + 2], d = Math.hypot(fx - pa0.x, fz - pa0.z);
+          if (d < 0.9) { wx += fx; wz += fz; wn++; }
+        }
+        if (wn >= 2) {
+          const cx = wx / wn - pa0.x, cz = wz / wn - pa0.z, cd = Math.hypot(cx, cz) || 1, m = Math.min(0.4, cd);
+          pa = { x: pa0.x + (cx / cd) * m, z: pa0.z + (cz / cd) * m };
+        }
+      }
       const dtA = Math.max(0.1, track[ka][0] - track[k][0]);
       const ahead = track[k][0] > tM + 0.3; // (can't happen often: we only advance up to "now")
       const ex = pa.x - me.x, ez = pa.z - me.z;
@@ -1946,6 +1974,44 @@
     }
     if (robot.state === 'BLOCKING') tapKey('KeyX', now); // blocker away whenever we're not defending
 
+    if (pushOK || (B.push && /^(approach|push|back)$/.test(B.push.stage) && offShift && !mustHead && view.phase !== 'auto')) {
+      if (!B.push || !/^(approach|push|back)$/.test(B.push.stage)) {
+        // a clump of loose fuel just in front of one of our trench mouths (our half of the neutral zone, off to the side)
+        const all = floorFuel(view, robot), bins = new Map();
+        for (let k = 0; k < all.length; k += 2) {
+          const x = all[k], z = all[k + 1];
+          if (s * x <= 0 || Math.abs(x) < 0.8 || Math.abs(x) > 2.9 || Math.abs(z) < 0.9 || Math.abs(z) > 2.7) continue;
+          const key = Math.floor(x / 0.7) * 1000 + Math.floor(z / 0.7), b = bins.get(key) || { n: 0, x: 0, z: 0 };
+          b.n++; b.x += x; b.z += z; bins.set(key, b);
+        }
+        let best = null, bestV = 0;
+        for (const b of bins.values()) { if (b.n < 3) continue; const bx = b.x / b.n, bz = b.z / b.n, v = b.n / (Math.hypot(bx - me.x, bz - me.z) + 1); if (v > bestV) { bestV = v; best = { x: bx, z: bz }; } }
+        B.push = best ? { stage: 'approach', x: best.x, z: best.z, dir: best.z >= 0 ? 1 : -1, t: now } : { stage: 'none', none: true, t: now };
+      }
+      const Pu = B.push;
+      if (/^(approach|push|back)$/.test(Pu.stage)) {
+        B.task = null;
+        sendKey('Space', false); sendKey('ShiftLeft', false); sendKey('KeyE', true); // intake in: push with the bumper
+        B.mode = 'pushing fuel to the trench';
+        if (Pu.stage === 'approach') {
+          const r = followTo(now, me, { x: Pu.x, z: Pu.z - Pu.dir * 0.95 }, P, true); // get behind the clump
+          vx = r.vx; vz = r.vz;
+          if (r.dGoal < 0.3 || (r.dGoal < 0.6 && now - Pu.t > 4000)) { Pu.stage = 'push'; Pu.ts = now; }
+          if (now - Pu.t > 6000) Pu.stage = 'done';
+        } else if (Pu.stage === 'push') {
+          vx = clamp((Pu.x - me.x) * 1.5, -0.4, 0.4); vz = Pu.dir * 0.55; // straight at the side wall
+          if (speed > 0.15) Pu.moved = now;
+          if (me.z * Pu.dir >= 2.95 || now - Pu.ts > 3500 || (now - Pu.ts > 700 && now - (Pu.moved || Pu.ts) > 600)) { Pu.stage = 'back'; Pu.ts = now; }
+        } else {
+          vz = -Pu.dir * 0.5; // back off so we don't drag it away again
+          if (now - Pu.ts > 450) Pu.stage = 'done';
+        }
+        B.nearGoal = true;
+        drive(vx, vz, null, yaw, sx);
+        B.wantMove = false; B.lastCmd = null;
+        return;
+      }
+    }
     if (passing || wantPass) {
       // Our hub is off: lob fuel into our alliance zone from the neutral zone and go get more.
       B.task = null;
@@ -2050,12 +2116,16 @@
             axis('fwd', (ax / n) * 0.5 * sx, 'KeyW', 'KeyS'); axis('side', (az / n) * 0.5 * sx, 'KeyD', 'KeyA');
           }
           // the last one to three fuel won't come out: don't sit there trying, they'll go with the next load
-          if (rawHop <= 3 && rawHop > 0 && now - B.shotProgress > 700 && !(robot.gate && (robot.gate.hood || robot.gate.flywheel || robot.gate.heading))) {
+          // (give them a good try first: leave the hub with an empty hopper unless a big pile is waiting nearby)
+          const bigPileNear = (() => { let n = 0; const Fv = view.fuel, Wh = Fv && Fv.where && Fv.where.length >= Fv.count ? Fv.where : null;
+            if (Fv && Fv.pos) for (let k = 0; k < Fv.count; k++) if ((!Wh || Wh[k] <= 1) && Fv.pos[3 * k + 1] < 0.25 && Math.hypot(Fv.pos[3 * k] - me.x, Fv.pos[3 * k + 2] - me.z) < 3) n++;
+            return n >= 25; })();
+          if (rawHop <= 3 && rawHop > 0 && now - B.shotProgress > (bigPileNear ? 700 : 2000) && !(robot.gate && (robot.gate.hood || robot.gate.flywheel || robot.gate.heading))) {
             B.jam = rawHop; B.pulses = 0; B.mode = 'collecting'; B.shootSession = false;
             sendKey('Space', false); sendKey('ShiftLeft', false);
             return;
           }
-          if (B.pulses >= 3) {
+          if (B.pulses >= (bigPileNear ? 3 : 4)) {
             const g = robot.gate || {};
             if (g.hood || g.flywheel || g.heading || g.range || g.speed) {
               // the shooter isn't happy with this spot: try the other side
@@ -2188,7 +2258,7 @@
           const tEnd = view.phase === 'endgame' ? (view.clock || 0) - 0.15
             : view.phase !== 'auto' && timing.active && isFinite(timing.untilInactive) && timing.untilInactive < 20 ? timing.untilInactive + P.postFire * 0.5 : null;
           if (tEnd != null) { o.deadline = tEnd; o.hop = rawHop; o.fireRate = fireRate; }
-          if (view.phase === 'auto' && info.dumper) o.preferFill = true; // dumpers in auto: one pass that fills the hopper
+          if (view.phase === 'auto' && (info.dumper || info.turret)) o.preferFill = true; // auto: one pass that fills the hopper
           const best = planRun(fuel, me, o);
           // (o.deadline is also used by rerateRun just below)
           // no run fits before the deadline: go and shoot what we have now, rather than wander and miss the buzzer
@@ -2205,7 +2275,8 @@
           const cycleRate = (rawHop + 1) / Math.max(1, (now - (B.cycleStart || now)) / 1000 + (o.back ? o.back(me.x, me.z) : 1.5) + rawHop / fireRate + 0.9);
           B.topOffWorth = !(rawHop >= Math.max(4, cap * 0.3) && (!best || best.rate < cycleRate));
           // auto: dumpers go back full (or when nothing's left in reach); others when topping up stops paying off
-          if (view.phase === 'auto' && rawHop >= 4 && (rawHop >= cap * 0.9 || !best || (!info.dumper && !B.topOffWorth))) B.autoNeedShoot = true;
+          // (turrets come back full too: two full swipes beat several part loads)
+          if (view.phase === 'auto' && rawHop >= 4 && (rawHop >= cap * 0.9 || !best || (!info.dumper && !info.turret && !B.topOffWorth))) B.autoNeedShoot = true;
         }
       }
       const busy = B.task && (B.task.type === 'run' || B.task.type === 'swipe' || (B.task.type !== 'pile' && B.task.stage !== 'approach'));
@@ -2533,7 +2604,7 @@
     'backing off': ['Backing off (no pin)', 'wait'], containing: ['Keeping them in their zone', 'bad'],
     'pushing back': ['Pushing them back', 'bad'],
     'escaping pin': ['Pinned — sliding out', 'bad'], 'bump defense': ['Ramming at the lane', 'bad'], 'guarding bump': ['Guarding the bump', 'bad'],
-    'guarding trench': ['Guarding the trench', 'bad'], 'copying a pro run': ['Copying a pro’s run', 'go'], 'holding (full)': ['Full — waiting to head back', 'wait'], 'clearing intake jam': ['Clearing intake jam', 'wait'], 'auto swipe': ['Auto swipe', 'go'], 'to the depot': ['Auto: to the depot', 'go'], 'releasing pin': ['Releasing pin (2 m back)', 'wait'],
+    'guarding trench': ['Guarding the trench', 'bad'], 'copying a pro run': ['Copying a pro’s run', 'go'], 'holding (full)': ['Full — waiting to head back', 'wait'], 'clearing intake jam': ['Clearing intake jam', 'wait'], 'auto swipe': ['Auto swipe', 'go'], 'to the depot': ['Auto: to the depot', 'go'], 'pushing fuel to the trench': ['Pushing fuel to the trench', 'go'], 'releasing pin': ['Releasing pin (2 m back)', 'wait'],
     off: ['Autopilot off', 'off'], 'waiting for a match': ['Waiting for a match', 'off'],
     'looking for the game': ['Looking for the game…', 'wait'], 'off in ranked': ['Off — Ranked is against real people', 'off'],
   };
