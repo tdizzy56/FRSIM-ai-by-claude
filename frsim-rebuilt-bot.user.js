@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.1.0
+// @version      2.1.1
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -1600,10 +1600,17 @@
       const stillAt = (i) => i + 1 < track.length && Math.hypot(track[i + 1][1] - track[i][1], track[i + 1][2] - track[i][2]) < 0.04;
       if (stillAt(k) && Math.hypot(P_(k).x - me.x, P_(k).z - me.z) < 0.6) {
         if (B.rkStillFrom == null) { B.rkStillFrom = k; B.rkLag = tM - track[k][0]; }
-        k = Math.max(k, idxAt(tM - B.rkLag)); // standing where they stood: keep their timing for this stretch
+        let k2 = Math.max(k, idxAt(tM - B.rkLag)); // standing where they stood: keep their timing for this stretch
+        // they fired from here: if we still have fuel when their stop ends, stay and finish (up to 2.3 s behind them)
+        let last = k, fired = 0; while (last + 1 < track.length && stillAt(last)) { fired |= track[last][4]; last++; }
+        fired |= track[last][4];
+        if ((fired & 3) && hop > 0 && k2 >= last && tM - track[last][0] < 2.3) k2 = Math.max(k, last - 1);
+        B.rkFired = fired;
+        k = k2;
       } else {
         B.rkStillFrom = null;
-        while (k + 1 < track.length && track[k + 1][0] <= tM + 0.25 &&
+        // (stop at the first point where they stood still: that stretch is then played out on their timing above)
+        while (k + 1 < track.length && track[k + 1][0] <= tM + 0.25 && !stillAt(k) &&
           Math.hypot(P_(k + 1).x - me.x, P_(k + 1).z - me.z) <= Math.hypot(P_(k).x - me.x, P_(k).z - me.z) + 0.05) k++;
       }
       k = Math.max(k, idxAt(tM - 2.5)); // too far behind: skip ahead
@@ -1619,7 +1626,7 @@
         const d = Math.hypot(ex, ez) || 1, want = Math.min(vm, sp + 1.8 * Math.max(0, d - 0.15));
         vx = (ex / d) * (want / vm); vz = (ez / d) * (want / vm);
       }
-      const act = track[k][4] | track[Math.min(track.length - 1, k + 1)][4];
+      const act = track[k][4] | track[Math.min(track.length - 1, k + 1)][4] | (B.rkStillFrom != null ? (B.rkFired || 0) & 3 : 0);
       const inZoneNow = depth < ZONE_DEPTH - 0.5;
       const shootNow = !!(act & 1) && inZoneNow && hop > 0, passNow = !!(act & 2) && !inZoneNow && hop > 0;
       if (shootNow || passNow) { if (info.turret) { vx *= 0.3; vz *= 0.3; } else { vx = 0; vz = 0; } } // stopped to fire (turrets may creep)
