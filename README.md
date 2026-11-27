@@ -23,8 +23,7 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
   on the way in, and brakes instead of coasting past its spot.
 - Singleplayer: collects anywhere on the field, including behind the other hub and down the trench lanes (robots that
   fit drive straight down the middle of the lane).
-- Hub off: brings full loads home and drops them in one tight pile beside its shooting spot (turrets pass instead);
-  when there isn't time for a drop trip it passes fuel into its own zone. Hub on: clears that stockpile with quick cycles, sliding along the back wall
+- Hub off: passes fuel into its own zone. Hub on: clears that stockpile with quick cycles, sliding along the back wall
   and shooting from wherever it picked the fuel up (in range), and still goes out when the neutral zone has more.
 - Gives up on fuel it can't get (wedged against something) instead of sitting there; no false "intake jammed" from
   fuel already in its own hopper; a last ball that won't fire waits for the next load.
@@ -105,7 +104,8 @@ learned stays in your browser either way.
 
 | Version | What it added | |
 | --- | --- | --- |
-| 2.2.0 | Bigger loads; builds a pile beside its shooting spot while the hub is off | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.0.user.js) |
+| 2.2.1 | Same play as 2.1.4 (the record experiments are taken out again) | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.1.user.js) |
+| 2.2.0 | Experimental: bigger loads, builds a pile while the hub is off | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.0.user.js) |
 | 2.1.4 | Leaderboard guard: bot-driven matches are never posted | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.4.user.js) |
 | 2.1.3 | 5460 plays as a dumper | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.3.user.js) |
 | 2.1.2 | Expandable hoppers (1678, 5460), real hopper capacity | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.2.user.js) |
