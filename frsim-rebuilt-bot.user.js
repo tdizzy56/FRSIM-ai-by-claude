@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FRSim Rebuilt Learning Bot
 // @namespace    frsim-rebuilt-bot
-// @version      2.2.1
+// @version      2.2.2
 // @description  Drives your robot in FRSim Rebuilt and learns to score more fuel in each shift.
 // @match        https://rebuilt.frsim.com/*
 // @run-at       document-start
@@ -11,7 +11,7 @@
 
 (() => {
   'use strict';
-  const VERSION = '2.2.1';
+  const VERSION = '2.2.2';
   const OTHER_COPY = window.__frsimBot && window.__frsimBot.version !== VERSION ? (window.__frsimBot.version || 'older') : null;
 
   // ---------------------------------------------------------------------------
@@ -1394,6 +1394,8 @@
     };
     // A turret that can't spin all the way round: the chassis heading that puts (tx, tz) in the middle of its swing,
     // or null when the target is already comfortably inside the swing (then the turret does the aiming).
+    // Firing at the hub while moving: go slow so the shots land (a fraction of this robot's own safe shooting speed)
+    const shotSpeedFrac = clamp(((info.maxShotSpeed || 1.5) * 0.5) / Math.max(3, B.vmax || 4), 0.18, 0.45);
     const turretChassisYaw = (tx, tz) => {
       if (info.turretHalfArc == null) return null;
       const want = wrap(yawToFace(tx - me.x, tz - me.z, info.shooterSign) - info.turretMid);
@@ -1717,7 +1719,7 @@
       if (F && F.pos) for (let k = 0; k < F.count; k++) if ((!Wh || Wh[k] <= 1) && inRect(depotR, F.pos[3 * k], F.pos[3 * k + 2], 0.15)) dn++;
       if (dn >= 6) { B.fin = { stage: 'go', t: now }; B.note = `Auto: shooting on the move to the depot (${dn} fuel there)`; }
     }
-    if (B.fin && view.phase === 'auto') {
+    if (B.fin && B.fin.stage !== 'done' && view.phase === 'auto') {
       B.task = null;
       const front = { x: (inward > 0 ? depotR.x1 : depotR.x0) + inward * (info.halfW + 0.35), z: (depotR.z0 + depotR.z1) / 2 };
       const towardWall = yawToFace(s, 0, mouthSign);
@@ -1727,7 +1729,7 @@
       if (B.fin.stage === 'go') {
         const r = followTo(now, me, front, P, true);
         // slow while shooting, so the shots still land
-        const lim = fire ? clamp((info.maxShotSpeed || 1.5) / Math.max(3, B.vmax || 4), 0.3, 0.7) : 1;
+        const lim = fire ? shotSpeedFrac : 1;
         vx = r.vx * lim; vz = r.vz * lim;
         wantYaw = r.dGoal < 2.2 ? towardWall : null; // the turret aims itself; turn the intake to the depot on the way
         if (fire) { const ty = turretChassisYaw(hub.x, hub.z); if (ty != null && r.dGoal > 1.2) wantYaw = ty; }
@@ -1738,6 +1740,10 @@
         wantYaw = towardWall;
         vx = s * (depth > 1.2 ? 0.4 : 0.12); vz = Math.sin(now / 170) * 0.35;
         B.mode = 'clearing depot';
+        // depot's empty (nothing's come in for a while): done here, back to normal auto
+        let left = 0; const F = view.fuel, Wh = F && F.where && F.where.length >= F.count ? F.where : null;
+        if (F && F.pos) for (let k = 0; k < F.count; k++) if ((!Wh || Wh[k] <= 1) && inRect(depotR, F.pos[3 * k], F.pos[3 * k + 2], 0.15)) left++;
+        if ((left < 3 && now - B.fin.t > 1500) || (now - B.fin.t > 2500 && now - (B.hopRiseAt || 0) > 2000)) B.fin = { stage: 'done', t: now };
       }
       B.nearGoal = true;
       drive(vx, vz, wantYaw, yaw, sx);
@@ -2007,7 +2013,8 @@
         (B.turretStop && speed < 0.5);
       if (atSpot) {
         if (fireOK) { // hub on, or about to come on: start the volley so the first fuel lands as it lights up
-          if (!B.shootSession) { B.shootSession = true; B.jam = 0; B.shootHop = rawHop; B.shotProgress = now; B.pulses = 0; if (view.phase === 'auto') B.autoVolleys = (B.autoVolleys || 0) + 1; }
+          if (view.phase === 'auto' && !/^shooting/.test(B.mode || '')) B.autoVolleys = (B.autoVolleys || 0) + 1; // a new volley
+          if (!B.shootSession) { B.shootSession = true; B.jam = 0; B.shootHop = rawHop; B.shotProgress = now; B.pulses = 0; }
           B.mode = 'shooting';
           if (rawHop < B.shootHop) { B.shootHop = rawHop; B.shotProgress = now; B.pulses = 0; }
           // If fuel stops coming out, re-tap score. Robots with a squeezing hopper also get a short
@@ -2078,7 +2085,8 @@
       vx = r.vx; vz = r.vz;
       // turrets fire on the move as soon as they're in range of an active hub
       if (info.moveShoot && fireOK && inRangeWide) {
-        if (!B.shootSession) { B.shootSession = true; B.jam = 0; if (view.phase === 'auto') B.autoVolleys = (B.autoVolleys || 0) + 1; }
+        if (view.phase === 'auto' && !/^shooting/.test(B.mode || '')) B.autoVolleys = (B.autoVolleys || 0) + 1; // a new volley
+        if (!B.shootSession) { B.shootSession = true; B.jam = 0; }
         sendKey('Space', true);
         stow(false);
         B.mode = 'shooting on the move';
@@ -2271,7 +2279,7 @@
             mag = Math.min(mag, Math.sqrt(2 * 3.2 * Math.max(0, left)) / Math.max(3, B.vmax || 4) + 0.12);
           }
           // a turret firing while it sweeps has to stay under its shooting speed or the game holds the shots
-          if (turretFireHere) mag = Math.min(mag, Math.max(0.3, ((info.maxShotSpeed || 2) * 0.9) / Math.max(3, B.vmax || 4)));
+          if (turretFireHere) mag = Math.min(mag, shotSpeedFrac);
           const corr = clamp(off * 1.6, -0.5, 0.5);
           vx = T.dx * mag + T.dz * corr; vz = T.dz * mag - T.dx * corr;
           wantYaw = along;
@@ -2400,6 +2408,11 @@
 
     if (B.mode !== 'to-hub' && B.mode !== 'shooting on the move') B.nearGoal = false;
     if (B.taskActive) B.nearGoal = true; // pushing on purpose: don't call it stuck
+    // anything that's firing at the hub while it moves (turrets shooting on the move or while collecting): slow down
+    if (held.has('Space') && inOurZone) {
+      const m = Math.hypot(vx, vz);
+      if (m > shotSpeedFrac) { vx *= shotSpeedFrac / m; vz *= shotSpeedFrac / m; }
+    }
     drive(vx, vz, wantYaw, yaw, sx);
     B.wantMove = Math.hypot(vx, vz) > 0.6;
     B.lastCmd = B.wantMove ? { x: vx, z: vz } : null;

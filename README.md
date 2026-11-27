@@ -66,7 +66,7 @@ Keep the game tab visible while it plays — browsers slow down scripts in backg
 
 **Robots** (reads each robot's own setup from the game)
 - Intake always faces the fuel; shoots only from inside its own alliance zone.
-- Turrets shoot from anywhere in range and pass on the move; the intake wiggles in and out to feed
+- Turrets shoot from anywhere in range (slowing down while they fire on the move, so the shots land) and pass on the move; the intake wiggles in and out to feed
   robots it helps. Sweeping their own zone (the back wall) with the hub on, they keep the intake running and fire on
   the move instead of stopping to shoot. Every robot keeps just clear of the tower (no trips into its pocket). Turrets that can't spin all the way round (971, 118, 5460) turn the chassis to keep the hub in
   their swing.
@@ -104,6 +104,7 @@ learned stays in your browser either way.
 
 | Version | What it added | |
 | --- | --- | --- |
+| 2.2.2 | Slows down while firing on the move; turret auto: two swipes before the depot, leaves it when empty | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.2.user.js) |
 | 2.2.1 | Same play as 2.1.4 (the record experiments are taken out again) | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.1.user.js) |
 | 2.2.0 | Experimental: bigger loads, builds a pile while the hub is off | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.2.0.user.js) |
 | 2.1.4 | Leaderboard guard: bot-driven matches are never posted | [install](https://github.com/tdizzy56/FRSIM-ai-by-claude/raw/main/versions/frsim-rebuilt-bot-v2.1.4.user.js) |
